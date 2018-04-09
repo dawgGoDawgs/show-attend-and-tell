@@ -6,7 +6,8 @@ from core.utils import *
 import tensorflow as tf
 import numpy as np
 import pandas as pd
-import hickle
+# import hickle
+import h5py
 import os
 import json
 
@@ -42,10 +43,10 @@ def _process_caption_data(caption_file, image_dir, max_length):
             del_idx.append(i)
     
     # delete captions if size is larger than max_length
-    print "The number of captions before deletion: %d" %len(caption_data)
+    print("The number of captions before deletion: %d" %len(caption_data))
     caption_data = caption_data.drop(caption_data.index[del_idx])
     caption_data = caption_data.reset_index(drop=True)
-    print "The number of captions after deletion: %d" %len(caption_data)
+    print( "The number of captions after deletion: %d" %len(caption_data))
     return caption_data
 
 
@@ -61,14 +62,14 @@ def _build_vocab(annotations, threshold=1):
             max_len = len(caption.split(" "))
 
     vocab = [word for word in counter if counter[word] >= threshold]
-    print ('Filtered %d words to %d words with word count threshold %d.' % (len(counter), len(vocab), threshold))
+    print('Filtered %d words to %d words with word count threshold %d.' % (len(counter), len(vocab), threshold))
 
     word_to_idx = {u'<NULL>': 0, u'<START>': 1, u'<END>': 2}
     idx = 3
     for word in vocab:
         word_to_idx[word] = idx
         idx += 1
-    print "Max length of caption: ", max_len
+    print("Max length of caption: ", max_len)
     return word_to_idx
 
 
@@ -91,7 +92,7 @@ def _build_caption_vector(annotations, word_to_idx, max_length=15):
                 cap_vec.append(word_to_idx['<NULL>']) 
         
         captions[i, :] = np.asarray(cap_vec)
-    print "Finished building caption vectors"
+    print("Finished building caption vectors")
     return captions
 
 
@@ -145,7 +146,7 @@ def main():
     # about 4000 images and 20000 captions for val / test dataset
     val_cutoff = int(0.1 * len(val_dataset))
     test_cutoff = int(0.2 * len(val_dataset))
-    print 'Finished processing caption data'
+    print('Finished processing caption data')
 
     save_pickle(train_dataset, 'data/train/train.annotations.pkl')
     save_pickle(val_dataset[:val_cutoff], 'data/val/val.annotations.pkl')
@@ -178,7 +179,7 @@ def main():
                 feature_to_captions[i] = []
             feature_to_captions[i].append(caption.lower() + ' .')
         save_pickle(feature_to_captions, './data/%s/%s.references.pkl' % (split, split))
-        print "Finished building %s caption dataset" %split
+        print("Finished building %s caption dataset" %split)
 
     # extract conv5_3 feature vectors
     vggnet = Vgg19(vgg_model_path)
@@ -187,7 +188,7 @@ def main():
         tf.initialize_all_variables().run()
         for split in ['train', 'val', 'test']:
             anno_path = './data/%s/%s.annotations.pkl' % (split, split)
-            save_path = './data/%s/%s.features.hkl' % (split, split)
+            save_path = './data/%s/%s.features.h5' % (split, split)
             annotations = load_pickle(anno_path)
             image_path = list(annotations['file_name'].unique())
             n_examples = len(image_path)
@@ -197,15 +198,21 @@ def main():
             for start, end in zip(range(0, n_examples, batch_size),
                                   range(batch_size, n_examples + batch_size, batch_size)):
                 image_batch_file = image_path[start:end]
-                image_batch = np.array(map(lambda x: ndimage.imread(x, mode='RGB'), image_batch_file)).astype(
+                image_batch = np.array(list(map(lambda x: ndimage.imread(x, mode='RGB'), image_batch_file))).astype(
                     np.float32)
                 feats = sess.run(vggnet.features, feed_dict={vggnet.images: image_batch})
                 all_feats[start:end, :] = feats
-                print ("Processed %d %s features.." % (end, split))
+                print("Processed %d %s features.." % (end, split))
 
-            # use hickle to save huge feature vectors
-            hickle.dump(all_feats, save_path)
-            print ("Saved %s.." % (save_path))
+            # use hickle to save huge feature vectors 
+            # hickle.dump(all_feats, save_path)     DEPRECATED: hickle is too slow.
+            
+            # use h5py to save huge feature vectors
+            h5f = h5py.File(save_path, 'w')
+            h5f.create_dataset('image_feature', data=all_feats)
+            h5f.close()
+    
+            print("Saved %s.." % (save_path))
 
 
 if __name__ == "__main__":

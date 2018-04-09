@@ -4,10 +4,12 @@ import skimage.transform
 import numpy as np
 import time
 import os
-import cPickle as pickle
+# import cPickle as pickle
+import six; from six.moves import cPickle as pickle
 from scipy import ndimage
-from utils import *
-from bleu import evaluate
+from tqdm import tqdm
+from .utils import *
+from .bleu import evaluate
 
 
 class CaptioningSolver(object):
@@ -70,6 +72,7 @@ class CaptioningSolver(object):
         n_examples = self.data['features'].shape[0]
         n_iters_per_epoch = int(np.ceil(float(n_examples)/self.batch_size))
         features = self.data['features']
+        print("features shape:", features.shape)
         captions = self.data['captions']
         image_idxs = self.data['image_idxs']
         val_features = self.val_data['features']
@@ -102,10 +105,10 @@ class CaptioningSolver(object):
         #summary_op = tf.merge_all_summaries()
         summary_op = tf.summary.merge_all()
 
-        print "The number of epoch: %d" %self.n_epochs
-        print "Data size: %d" %n_examples
-        print "Batch size: %d" %self.batch_size
-        print "Iterations per epoch: %d" %n_iters_per_epoch
+        print( "The number of epoch: %d" %self.n_epochs )
+        print( "Data size: %d" %n_examples )
+        print( "Batch size: %d" %self.batch_size )
+        print( "Iterations per epoch: %d" %n_iters_per_epoch )
 
         config = tf.ConfigProto(allow_soft_placement = True)
         #config.gpu_options.per_process_gpu_memory_fraction=0.9
@@ -117,7 +120,7 @@ class CaptioningSolver(object):
             saver = tf.train.Saver(max_to_keep=40)
 
             if self.pretrained_model is not None:
-                print "Start training with pretrained Model.."
+                print("Start training with pretrained Model..")
                 saver.restore(sess, self.pretrained_model)
 
             prev_loss = -1
@@ -129,7 +132,7 @@ class CaptioningSolver(object):
                 captions = captions[rand_idxs]
                 image_idxs = image_idxs[rand_idxs]
 
-                for i in range(n_iters_per_epoch):
+                for i in tqdm(range(n_iters_per_epoch)):
                     captions_batch = captions[i*self.batch_size:(i+1)*self.batch_size]
                     image_idxs_batch = image_idxs[i*self.batch_size:(i+1)*self.batch_size]
                     features_batch = features[image_idxs_batch]
@@ -143,39 +146,42 @@ class CaptioningSolver(object):
                         summary_writer.add_summary(summary, e*n_iters_per_epoch + i)
 
                     if (i+1) % self.print_every == 0:
-                        print "\nTrain loss at epoch %d & iteration %d (mini-batch): %.5f" %(e+1, i+1, l)
+                        print( "\nTrain loss at epoch %d & iteration %d (mini-batch): %.5f" %(e+1, i+1, l))
                         ground_truths = captions[image_idxs == image_idxs_batch[0]]
                         decoded = decode_captions(ground_truths, self.model.idx_to_word)
                         for j, gt in enumerate(decoded):
-                            print "Ground truth %d: %s" %(j+1, gt)
+                            print( "Ground truth %d: %s" %(j+1, gt) )
                         gen_caps = sess.run(generated_captions, feed_dict)
                         decoded = decode_captions(gen_caps, self.model.idx_to_word)
-                        print "Generated caption: %s\n" %decoded[0]
+                        print( "Generated caption: %s\n" %decoded[0] )
 
-                print "Previous epoch loss: ", prev_loss
-                print "Current epoch loss: ", curr_loss
-                print "Elapsed time: ", time.time() - start_t
+                print( "Previous epoch loss: ", prev_loss )
+                print( "Current epoch loss: ", curr_loss )
+                print( "Elapsed time: ", time.time() - start_t )
                 prev_loss = curr_loss
                 curr_loss = 0
 
-                # print out BLEU scores and file write
+                # print out BLEU scores
                 if self.print_bleu:
-                    all_gen_cap = np.ndarray((val_features.shape[0], 20))
-                    for i in range(n_iters_val):
-                        features_batch = val_features[i*self.batch_size:(i+1)*self.batch_size]
-                        feed_dict = {self.model.features: features_batch}
-                        gen_cap = sess.run(generated_captions, feed_dict=feed_dict)
-                        all_gen_cap[i*self.batch_size:(i+1)*self.batch_size] = gen_cap
-
-                    all_decoded = decode_captions(all_gen_cap, self.model.idx_to_word)
-                    save_pickle(all_decoded, "./data/val/val.candidate.captions.pkl")
                     scores = evaluate(data_path='./data', split='val', get_scores=True)
                     write_bleu(scores=scores, path=self.model_path, epoch=e)
+                
+                # validation file write
+                all_gen_cap = np.ndarray((val_features.shape[0], 20))
+                for i in range(n_iters_val):
+                    features_batch = val_features[i*self.batch_size:(i+1)*self.batch_size]
+                    feed_dict = {self.model.features: features_batch}
+                    gen_cap = sess.run(generated_captions, feed_dict=feed_dict)
+                    all_gen_cap[i*self.batch_size:(i+1)*self.batch_size] = gen_cap
+
+                all_decoded = decode_captions(all_gen_cap, self.model.idx_to_word)
+                save_pickle(all_decoded, "./data/val/val.candidate.captions.pkl")
+
 
                 # save model's parameters
                 if (e+1) % self.save_every == 0:
                     saver.save(sess, os.path.join(self.model_path, 'model'), global_step=e+1)
-                    print "model-%s saved." %(e+1)
+                    print( "model-%s saved." %(e+1) )
 
 
     def test(self, data, split='train', attention_visualization=True, save_sampled_captions=True):
@@ -209,7 +215,7 @@ class CaptioningSolver(object):
 
             if attention_visualization:
                 for n in range(10):
-                    print "Sampled Caption: %s" %decoded[n]
+                    print( "Sampled Caption: %s" %decoded[n] )
 
                     # Plot original image
                     img = ndimage.imread(image_files[n])

@@ -13,11 +13,17 @@ def main():
     model = CaptionGenerator(word_to_idx, dim_feature=[196, 512], dim_embed=512,
                                        dim_hidden=1024, n_time_step=16, prev2out=True, 
                                                  ctx2out=True, alpha_c=1.0, selector=True, dropout=True)
+#    THERE'S SOME PROBLEM WITH BLEU SCORE CALCULATOR AT THE MOMENT.
+#
+#    solver = CaptioningSolver(model, data, val_data, n_epochs=20, batch_size=128, update_rule='adam',
+#                                          learning_rate=0.001, print_every=1000, save_every=1, image_path='./image/',
+#                                    pretrained_model=None, model_path='model/lstm/', test_model='model/lstm/model-10',
+#                                     print_bleu=True, log_path='log/')
 
     solver = CaptioningSolver(model, data, val_data, n_epochs=20, batch_size=128, update_rule='adam',
                                           learning_rate=0.001, print_every=1000, save_every=1, image_path='./image/',
                                     pretrained_model=None, model_path='model/lstm/', test_model='model/lstm/model-10',
-                                     print_bleu=True, log_path='log/')
+                                     print_bleu=False, log_path='log/')
 
     solver.train()
 

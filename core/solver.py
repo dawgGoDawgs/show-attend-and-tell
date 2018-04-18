@@ -10,6 +10,8 @@ from scipy import ndimage
 from tqdm import tqdm
 from .utils import *
 from .bleu import evaluate
+from PIL import Image
+from core.vggnet import Vgg19
 
 
 class CaptioningSolver(object):
@@ -182,8 +184,7 @@ class CaptioningSolver(object):
                 if (e+1) % self.save_every == 0:
                     saver.save(sess, os.path.join(self.model_path, 'model'), global_step=e+1)
                     print( "model-%s saved." %(e+1) )
-
-
+        
     def test(self, data, split='train', attention_visualization=True, save_sampled_captions=True):
         '''
         Args:
@@ -206,9 +207,9 @@ class CaptioningSolver(object):
         config = tf.ConfigProto(allow_soft_placement=True)
         config.gpu_options.allow_growth = True
         with tf.Session(config=config) as sess:
+            features_batch, image_files = sample_coco_minibatch(data, self.batch_size)
             saver = tf.train.Saver()
             saver.restore(sess, self.test_model)
-            features_batch, image_files = sample_coco_minibatch(data, self.batch_size)
             feed_dict = { self.model.features: features_batch }
             alps, bts, sam_cap = sess.run([alphas, betas, sampled_captions], feed_dict)  # (N, max_len, L), (N, max_len)
             decoded = decode_captions(sam_cap, self.model.idx_to_word)
@@ -246,3 +247,67 @@ class CaptioningSolver(object):
                     all_sam_cap[i*self.batch_size:(i+1)*self.batch_size] = sess.run(sampled_captions, feed_dict)
                 all_decoded = decode_captions(all_sam_cap, self.model.idx_to_word)
                 save_pickle(all_decoded, "./data/%s/%s.candidate.captions.pkl" %(split,split))
+
+    def test_custom(self, image_dir, vgg_model_path, attention_visualization=True):
+        '''
+        Args:
+            - data: dictionary with the following keys:
+            - image_file: Image file name
+            - attention_visualization: If True, visualize attention weights with images for each sampled word. (ipthon notebook)
+        '''
+        # build a graph to sample captions
+        alphas, betas, sampled_captions = self.model.build_sampler(max_len=20)    # (N, max_len, L), (N, max_len)
+        
+        # image files:
+        import glob, os
+        image_files = []
+        for file in glob.glob(image_dir+"*.jpg"):
+            image_files.append(file)
+        
+        # read in image feature
+        image_features = []
+        imgs = []
+        graph = tf.Graph()
+        with graph.as_default():
+            with tf.Session() as sess:
+                vggnet = Vgg19(vgg_model_path)
+                vggnet.build()            
+                tf.initialize_all_variables().run()
+                for image_file in image_files:
+                    with open(image_file, 'r+b') as f:
+                        with Image.open(f) as image:
+                            img = np.asarray(resize_image(image))
+                            imgs.append(img)
+                image_batch = np.array(imgs)
+                image_features = sess.run(vggnet.features, feed_dict={vggnet.images: image_batch})
+
+        config = tf.ConfigProto(allow_soft_placement=True)
+        config.gpu_options.allow_growth = True            
+        with tf.Session(config=config) as sess:
+            saver = tf.train.Saver()
+            saver.restore(sess, self.test_model)
+            feed_dict = { self.model.features: image_features }
+            alps, bts, sam_cap = sess.run([alphas, betas, sampled_captions], feed_dict)  # (N, max_len, L), (N, max_len)
+            decoded = decode_captions(sam_cap, self.model.idx_to_word)
+            for i in range(len(imgs)):
+                img = imgs[i]
+                print( "Sampled Caption: %s" %decoded[i] )
+                # Plot original image
+                #plt.figure(figsize=(18,9))
+                plt.subplot(4, 5, 1)
+                plt.imshow(img)
+                plt.axis('off')
+                if attention_visualization:
+                    # Plot images with attention weights
+                    words = decoded[i].split(" ")
+                    for t in range(len(words)):
+                        if t > 18:
+                            break
+                        plt.subplot(4, 5, t+2)
+                        plt.text(0, 1, '%s(%.2f)'%(words[t], bts[i,t]) , color='black', backgroundcolor='white', fontsize=8)
+                        plt.imshow(img)
+                        alp_curr = alps[i,t,:].reshape(14,14)
+                        alp_img = skimage.transform.pyramid_expand(alp_curr, upscale=16, sigma=20)
+                        plt.imshow(alp_img, alpha=0.85)
+                        plt.axis('off')
+                    plt.show()
